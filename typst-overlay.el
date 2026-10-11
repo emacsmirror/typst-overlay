@@ -30,8 +30,8 @@
 ;; To refresh on save, add `typst-overlay-save-refresh' to
 ;; `after-save-hook'.
 ;;
-;; With `flymake-mode' on, equations that fail to compile are reported
-;; as Flymake diagnostics.
+;; Equations that fail to compile are reported to Flymake, in org
+;; buffers by default; see `typst-overlay-use-flymake'.
 ;;
 ;; Requires the `typst' executable on PATH and the Typst tree-sitter
 ;; grammar.  See `customize-group' `typst-overlay' for options.
@@ -47,6 +47,7 @@
 (declare-function flymake-make-diagnostic "flymake"
                   (locus beg end type text &optional data overlay-properties))
 (declare-function flymake-diagnostics "flymake" (&optional beg end))
+(declare-function eglot-managed-p "eglot" ())
 (declare-function flymake-start "flymake" (&optional deferred force))
 
 (defvar flymake-mode)
@@ -83,6 +84,21 @@ compiling its share in one batch."
 (defcustom typst-overlay-extra-prelude ""
   "Extra Typst code prepended to every rendered overlay element."
   :type 'string
+  :group 'typst-overlay)
+
+(defcustom typst-overlay-use-flymake 'org
+  "Where to report equations that fail to compile to Flymake.
+If `org', in org buffers only, where no language server checks the
+math.  If t, also in Typst buffers.  If nil, nowhere.
+
+Where it applies, `typst-overlay-mode' adds `typst-overlay-flymake' to
+`flymake-diagnostic-functions', so the errors show up once
+`flymake-mode' is on.  Not while Eglot manages the buffer: its
+language server reports compile errors itself.  Takes effect when
+`typst-overlay-mode' is turned on."
+  :type '(choice (const :tag "In org buffers" org)
+                 (const :tag "Everywhere" t)
+                 (const :tag "Nowhere" nil))
   :group 'typst-overlay)
 
 (defface typst-overlay-error
@@ -1495,11 +1511,27 @@ its language server reports compile errors itself."
 
 (defun typst-overlay-flymake (report-fn &rest _args)
   "Flymake backend for equations that failed to compile.
-`typst-overlay-mode' adds it to `flymake-diagnostic-functions'.  It
+`typst-overlay-mode' adds it to `flymake-diagnostic-functions' where
+`typst-overlay-use-flymake' applies.  It
 reports the errors of the last `typst-overlay-refresh' to REPORT-FN,
 and keeps reporting as compiles finish."
   (setq typst-overlay--flymake-report-fn report-fn)
   (typst-overlay--flymake-report))
+
+(defun typst-overlay--sync-flymake-backend ()
+  "Make `typst-overlay-flymake' a Flymake backend, or stop it being one.
+It is one where `typst-overlay-use-flymake' applies and Eglot does not
+manage the buffer.  Also runs from `eglot-managed-mode-hook', so this
+holds whether Eglot starts before or after `typst-overlay-mode'."
+  (if (and (if (eq typst-overlay-use-flymake 'org)
+               (derived-mode-p 'org-mode)
+             typst-overlay-use-flymake)
+           (not (and (fboundp 'eglot-managed-p) (eglot-managed-p))))
+      (unless (memq #'typst-overlay-flymake flymake-diagnostic-functions)
+        (add-hook 'flymake-diagnostic-functions #'typst-overlay-flymake nil t)
+        (when (bound-and-true-p flymake-mode)
+          (flymake-start)))
+    (remove-hook 'flymake-diagnostic-functions #'typst-overlay-flymake t)))
 
 ;; The backend runs no code from the buffer, it only reports errors
 ;; found by `typst-overlay-mode', so Flymake may run it in untrusted
@@ -1614,14 +1646,13 @@ Intended for use in `after-save-hook'."
   (add-hook 'post-command-hook #'typst-overlay--post-command-update nil t)
   (add-hook 'enable-theme-functions #'typst-overlay--on-theme-change)
   (add-hook 'disable-theme-functions #'typst-overlay--on-theme-change)
-  (add-hook 'flymake-diagnostic-functions #'typst-overlay-flymake nil t)
+  (add-hook 'eglot-managed-mode-hook #'typst-overlay--sync-flymake-backend nil t)
   (add-hook 'eldoc-documentation-functions #'typst-overlay--eldoc nil t)
   ;; Org buffers, for one, have no ElDoc function until now.
   (when global-eldoc-mode
     (turn-on-eldoc-mode))
   (typst-overlay-refresh)
-  (when (bound-and-true-p flymake-mode)
-    (flymake-start)))
+  (typst-overlay--sync-flymake-backend))
 
 (defun typst-overlay--disable ()
   "Tear down `typst-overlay-mode' in the current buffer."
@@ -1633,6 +1664,7 @@ Intended for use in `after-save-hook'."
   ;; Clear the diagnostics of the overlays just deleted.
   (typst-overlay--flymake-report)
   (remove-hook 'flymake-diagnostic-functions #'typst-overlay-flymake t)
+  (remove-hook 'eglot-managed-mode-hook #'typst-overlay--sync-flymake-backend t)
   (remove-hook 'eldoc-documentation-functions #'typst-overlay--eldoc t)
   (kill-local-variable 'typst-overlay--flymake-report-fn))
 
