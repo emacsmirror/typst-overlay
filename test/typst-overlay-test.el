@@ -730,7 +730,7 @@ counts of every compile started, in order."
     (should (= (length (typst-overlay-test--overlays 'typst-overlay)) 3))))
 
 (ert-deftest typst-overlay-test-flymake ()
-  "Failed equations are reported to Flymake, which then underlines them."
+  "Failed equations are reported to Flymake, and still marked as failed."
   (skip-unless (treesit-language-available-p 'typst))
   (typst-overlay-test--with-batches
       (replace-regexp-in-string "x_2" "BAD" (typst-overlay-test--equations 3))
@@ -753,19 +753,60 @@ counts of every compile started, in order."
       (should-not (diagnostics))
       (run-compiles)
       (should (equal (diagnostics) '(("$BAD$" "unknown variable: BAD"))))
-      (should-not (error-face))
-      ;; Without Flymake, the mode underlines the equation itself.
-      (flymake-mode -1)
       (should (eq (error-face) 'typst-overlay-error))
+      (flymake-mode -1)
       (flymake-mode 1)
       (flymake-start)
       (should (equal (diagnostics) '(("$BAD$" "unknown variable: BAD"))))
-      (should-not (error-face))
       ;; Turning the mode off clears its diagnostics.
       (typst-overlay-mode -1)
       (should-not (diagnostics))
       (should-not (memq #'typst-overlay-flymake flymake-diagnostic-functions))
       (flymake-mode -1))))
+
+(ert-deftest typst-overlay-test-flymake-eglot ()
+  "With Eglot, its language server reports errors and the mode steps aside."
+  (skip-unless (treesit-language-available-p 'typst))
+  (typst-overlay-test--with-batches
+      (replace-regexp-in-string "x_2" "BAD" (typst-overlay-test--equations 3))
+      (typst-overlay-test--error-at "BAD" "unknown variable: BAD")
+    (cl-flet ((backends ()
+                (mapcar #'flymake-diagnostic-backend (flymake-diagnostics)))
+              (error-face ()
+                (overlay-get (car (typst-overlay--error-overlays)) 'face)))
+      (flymake-mode 1)
+      (flymake-start)
+      (run-compiles)
+      (should (equal (backends) '(typst-overlay-flymake)))
+      ;; What Eglot does when it starts managing the buffer.
+      (setq-local flymake-diagnostic-functions
+                  (list (lambda (report-fn &rest _) (funcall report-fn nil))))
+      (flymake-mode 1)
+      (flymake-start)
+      (should-not (backends))
+      ;; Still marked as failed to render.
+      (should (eq (error-face) 'typst-overlay-error))
+      ;; Later compiles are not reported either.
+      (typst-overlay-refresh)
+      (run-compiles)
+      (should-not (backends))
+      (flymake-mode -1))))
+
+(ert-deftest typst-overlay-test-error-not-shown-over-flymake ()
+  "The error is not shown where Flymake already shows a diagnostic."
+  (with-temp-buffer
+    (insert "Bad $ac$ end.")
+    (typst-overlay--place-error-overlay
+     (typst-overlay-test--element 5 "$ac$") "unknown variable: ac")
+    (let (shown)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) shown)))
+                ((symbol-function 'flymake-diagnostics)
+                 (lambda (&rest _) '(diagnostic))))
+        (setq-local flymake-mode t)
+        (goto-char 6)
+        (typst-overlay--echo-error-at-point))
+      (should-not shown))))
 
 ;;; Image size
 
