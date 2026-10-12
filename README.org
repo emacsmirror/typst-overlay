@@ -3,18 +3,18 @@
 
 [[file:demo.gif]]
 
-Render Typst math equations as inline overlays in Emacs. Equations are asynchronously compiled to SVG using the =typst= compiler and displayed on top of the source text. Overlays are visible when the cursor is outside the equation and hidden when the cursor moves inside, revealing the raw source for editing. Overlays are invalidated when the underlying text is modified and restored on the next refresh.
+Render Typst math equations as inline overlays in Emacs. Equations are asynchronously compiled to SVG using the =typst= compiler and displayed on top of the source text. Overlays are visible when the cursor is outside the equation and hidden when the cursor moves inside, revealing the raw source for editing.
 
 Equations that fail to render get a dotted red underline (face =typst-overlay-error=); move point into one, or hover over it, to see the error. They can also be reported to Flymake (see below).
+
+** Supported modes
+- =org-mode= — renders =$...$= as Typst math, following Typst's rules: =$x$= is inline and =$ x $= is display. Math may nest, as in =$#table($x$)$=. Write =\$= for a literal dollar sign. Math may span lines within a paragraph, and is ignored in code, verbatim and src blocks.
+- =typst-ts-mode= — renders all math equations in Typst documents
 
 ** Requirements
 - Emacs 29.1 or later, built with SVG support (most builds are)
 - [[https://typst.app][typst]] compiler available on =PATH=
 - [[https://github.com/uben0/tree-sitter-typst][Tree-sitter grammar for Typst]], used to find equations in both modes. It is already installed if you use =typst-ts-mode=; otherwise run =M-x treesit-install-language-grammar=.
-
-** Supported modes
-- =org-mode= — renders =$...$= as Typst math, following Typst's rules: =$x$= is inline and =$ x $= is display. Math may nest, as in =$#table($x$)$=. Write =\$= for a literal dollar sign. Math may span lines within a paragraph, and is ignored in code, verbatim and src blocks.
-- =typst-ts-mode= — renders all math equations in Typst documents
 
 ** Installation
 The recommended configuration:
@@ -35,16 +35,19 @@ The recommended configuration:
 To render math in org buffers too, add =(org-mode . typst-overlay-mode)= and =(org-mode . flymake-mode)= to =:hook=.
 
 ** Usage
-Enable the minor mode with =M-x typst-overlay-mode=. To render overlays manually run =M-x typst-overlay-refresh=.
+Enable the minor mode with =M-x typst-overlay-mode=, or with a hook as above, and the buffer's equations are rendered. Editing an equation removes its overlay until the next refresh, which the =after-save-hook= above runs on save. To refresh by hand, run =M-x typst-overlay-refresh=.
+
+** Cache
+Rendered equations are saved as SVG files in a =.typst-overlay-cache= directory next to the file, so reopening it shows them without compiling again. Buffers without a file, such as those of =org-capture=, use one in the temporary directory instead. Old SVG files are not removed; the directory is safe to delete at any time, and equations are compiled again as needed. You may want to add it to your =.gitignore=.
 
 ** Flymake
 In org buffers, turn on =flymake-mode= alongside =typst-overlay-mode= and equations that fail to compile are reported to Flymake: listed by =flymake-show-buffer-diagnostics= and visited with =flymake-goto-next-error=. No language server checks math in org buffers, so typst-overlay is the only source of these errors there.
 
 In Typst buffers this is opt-in, by setting =typst-overlay-use-flymake= to =t= as in the recommended configuration, since a language server may check them already. Set it to =nil= to never report to Flymake.
 
-Errors are those of the last refresh, so they update when overlays are refreshed, for example on save.
+In buffers managed by Eglot, for example with =tinymist=, typst-overlay reports alongside the language server, whether Eglot starts before or after =typst-overlay-mode=. Typst stops at the first evaluation error in a document, so the language server reports those one at a time, while typst-overlay compiles each equation on its own and reports them all. An equation that both report shows up twice; with Flymake 1.4 or later (Emacs 31), typst-overlay's entry is labeled =typst-overlay=.
 
-In buffers managed by Eglot, for example with =tinymist=, typst-overlay reports alongside the language server, whether Eglot starts before or after =typst-overlay-mode=. Typst stops at the first evaluation error in a document, so the language server reports those one at a time, while typst-overlay compiles each equation on its own and reports them all. An equation both report shows up twice; with Flymake 1.4 or later (Emacs 31) typst-overlay's carry the origin =typst-overlay=.
+Errors are those of the last refresh, so they update when overlays are refreshed, for example on save.
 
 ** Configuration
 All options are available via =M-x customize-group RET typst-overlay=.
