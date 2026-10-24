@@ -69,12 +69,27 @@ headings."
   :type 'number
   :group 'typst-overlay)
 
-(defcustom typst-overlay-cache-dir-name ".typst-overlay-cache"
-  "Name of the directory used to store rendered SVG files.
-It is created next to the buffer's file, or in the variable
-`temporary-file-directory' for buffers without one."
-  :type 'string
-  :group 'typst-overlay)
+(defcustom typst-overlay-cache-directory
+  (expand-file-name "typst-overlay/"
+                    (cond ((getenv "XDG_CACHE_HOME"))
+                          ((and (eq system-type 'windows-nt) (getenv "LOCALAPPDATA")))
+                          ((eq system-type 'darwin) "~/Library/Caches")
+                          ((file-directory-p "~/.cache") "~/.cache")
+                          (t user-emacs-directory)))
+  "Directory where rendered equations are kept, as SVG files.
+By default it is in the user's cache directory: $XDG_CACHE_HOME if
+set, %LOCALAPPDATA% on Windows, ~/Library/Caches on macOS, or else
+~/.cache, or failing that `user-emacs-directory'.
+They are kept in a folder per folder of the files they were rendered
+for, named after its path, so reopening a file shows them without
+compiling again.  The directory is safe to delete at any time."
+  :type 'directory
+  :group 'typst-overlay
+  :package-version '(typst-overlay . "0.7.0"))
+
+(defvar typst-overlay-cache-dir-name nil)
+(make-obsolete-variable 'typst-overlay-cache-dir-name
+                        'typst-overlay-cache-directory "0.7.0")
 
 (defcustom typst-overlay-max-active-compiles 8
   "Maximum number of concurrent Typst compilation processes.
@@ -1900,12 +1915,31 @@ it stops, so this also runs from `eglot-managed-mode-hook'."
 
 (defun typst-overlay--cache-dir ()
   "Return the directory for the current buffer's cached SVG files.
-It is next to the buffer's file.  Buffers without one, such as
-org-capture's, use one in the variable `temporary-file-directory'."
-  (expand-file-name typst-overlay-cache-dir-name
-                    (if buffer-file-name
-                        (file-name-directory buffer-file-name)
-                      temporary-file-directory)))
+It is in `typst-overlay-cache-directory', named after the folder of
+the buffer's file, or for buffers without one, such as org-capture's,
+its own folder; see `typst-overlay--cache-dir-name'.
+
+Each folder has its own, so equations whose preludes name files by
+relative paths, which may differ between folders, cannot share
+images."
+  (expand-file-name (typst-overlay--cache-dir-name (typst-overlay--buffer-dir))
+                    typst-overlay-cache-directory))
+
+(defun typst-overlay--cache-dir-name (dir)
+  "Return the name of the cache folder for the files in DIR.
+Like backup files in `backup-directory-alist', it is DIR's path with
+each / written as ! and each ! as !!, and a drive such as c: as
+!drive_c, as : is not allowed in file names on Windows.  A name longer
+than 100 characters is replaced by its hash, so the path stays well
+within the length Windows allows."
+  (let ((name (replace-regexp-in-string
+               "/" "!"
+               (replace-regexp-in-string
+                "\\`\\([a-zA-Z]\\):" "!drive_\\1"
+                (replace-regexp-in-string "!" "!!" dir)))))
+    (if (> (length name) 100)
+        (md5 name)
+      name)))
 
 (defun typst-overlay--artifact-svg-path (cache-key)
   "Return the cached SVG path for CACHE-KEY."
