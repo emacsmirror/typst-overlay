@@ -92,6 +92,6 @@ jobs:
           LOCAL_REPO: ${{ github.workspace }}
           RECIPE: (typst-overlay :fetcher github :repo "hesampakdaman/typst-overlay")
           WARN_IS_ERROR: true
-          # Not on MELPA yet.
-          EXIST_OK: false
+          # Already on MELPA, which melpazoid reports for new packages.
+          EXIST_OK: true
         run: make -C ~/melpazoid
